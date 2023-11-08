@@ -16,8 +16,7 @@ namespace AccessLog {
  */
 template <class Context> class ExtensionFilterFactoryBase : public Config::TypedFactory {
 public:
-  ExtensionFilterFactoryBase()
-      : category_(fmt::format("envoy.{}.access_loggers.extension_filters", Context::category())) {}
+  ExtensionFilterFactoryBase() : category_(categoryByType()) {}
 
   ~ExtensionFilterFactoryBase() override = default;
 
@@ -30,14 +29,28 @@ public:
    * @return an instance of extension filter implementation from a config proto.
    */
   virtual FilterBasePtr<Context>
-  createFilter(const Protobuf::Message& config,
+  createFilter(const envoy::config::accesslog::v3::ExtensionFilter& config,
                Server::Configuration::CommonFactoryContext& context) PURE;
 
   std::string category() const override { return category_; }
 
 private:
+  std::string categoryByType() {
+    if constexpr (std::is_same_v<Context, Formatter::HttpFormatterContext>) {
+      // This is a special case for the HTTP formatter context to ensure backwards compatibility.
+      return "envoy.access_loggers.extension_filters";
+    } else {
+      return fmt::format("envoy.{}.access_loggers.extension_filters", Context::category());
+    }
+  }
+
   const std::string category_;
 };
+
+/**
+ * Extension filter factory that reads from ExtensionFilter proto.
+ */
+using ExtensionFilterFactory = ExtensionFilterFactoryBase<Formatter::HttpFormatterContext>;
 
 /**
  * Implemented for each AccessLog::Instance and registered via Registry::registerFactory or the
@@ -82,6 +95,43 @@ public:
 
 private:
   const std::string category_;
+};
+
+/**
+ * Implemented for each AccessLog::Instance and registered via Registry::registerFactory or the
+ * convenience class RegisterFactory.
+ */
+class AccessLogInstanceFactory : public Config::TypedFactory {
+public:
+  ~AccessLogInstanceFactory() override = default;
+
+  /**
+   * Create a particular AccessLog::Instance implementation from a config proto. If the
+   * implementation is unable to produce a factory with the provided parameters, it should throw an
+   * EnvoyException. The returned pointer should never be nullptr.
+   * @param config the custom configuration for this access log type.
+   * @param filter filter to determine whether a particular request should be logged. If no filter
+   * was specified in the configuration, argument will be nullptr.
+   * @param context access log context through which persistent resources can be accessed.
+   */
+  virtual AccessLog::InstanceSharedPtr
+  createAccessLogInstance(const Protobuf::Message& config, AccessLog::FilterPtr&& filter,
+                          Server::Configuration::ListenerAccessLogFactoryContext& context) PURE;
+
+  /**
+   * Create a particular AccessLog::Instance implementation from a config proto. If the
+   * implementation is unable to produce a factory with the provided parameters, it should throw an
+   * EnvoyException. The returned pointer should never be nullptr.
+   * @param config the custom configuration for this access log type.
+   * @param filter filter to determine whether a particular request should be logged. If no filter
+   * was specified in the configuration, argument will be nullptr.
+   * @param context general filter context through which persistent resources can be accessed.
+   */
+  virtual AccessLog::InstanceSharedPtr
+  createAccessLogInstance(const Protobuf::Message& config, AccessLog::FilterPtr&& filter,
+                          Server::Configuration::CommonFactoryContext& context) PURE;
+
+  std::string category() const override { return "envoy.access_loggers"; }
 };
 
 } // namespace AccessLog
